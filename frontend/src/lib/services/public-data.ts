@@ -169,6 +169,17 @@ function kstTodayYmd(now = new Date()): string {
   return `${kst.getUTCFullYear()}${String(kst.getUTCMonth() + 1).padStart(2, "0")}${String(kst.getUTCDate()).padStart(2, "0")}`;
 }
 
+function kstOffsetYmd(dayOffset: number, now = new Date()): string {
+  const kstMs = now.getTime() + (9 * 60 - now.getTimezoneOffset()) * 60 * 1000;
+  const kst = new Date(kstMs + dayOffset * 86400000);
+  return `${kst.getUTCFullYear()}${String(kst.getUTCMonth() + 1).padStart(2, "0")}${String(kst.getUTCDate()).padStart(2, "0")}`;
+}
+
+/** 일자별 교통량 API는 당일 집계가 비어 있을 수 있어 최근 3일을 순서대로 시도 */
+function trafficSumDateCandidates(): string[] {
+  return [kstOffsetYmd(-1), kstOffsetYmd(-2), kstTodayYmd()];
+}
+
 function volumeToCongestion(totalVolume: number): string {
   if (totalVolume >= 500_000) return "정체";
   if (totalVolume >= 300_000) return "서행";
@@ -203,47 +214,49 @@ export async function getTraffic(origin: string, destination: string) {
   };
   if (!key) return fallback;
 
-  const sumDate = kstTodayYmd();
-  const result = await fetchExApiJson(
-    "http://data.ex.co.kr/openapi/trafficapi/nationalTrafficVolumn",
-    key,
-    { type: "json", sumDate, exDivCode: "00" },
-  );
+  const trafficBaseUrl = "https://data.ex.co.kr/openapi/trafficapi/nationalTrafficVolumn";
+  let lastApiMessage: string | undefined;
+  let lastStatus: number | undefined;
 
-  if (!result?.res.ok) {
-    logger.warn("교통 API 실패, mock 데이터 사용", {
-      operation: "getTraffic",
-      origin,
-      destination,
-      status: result?.res.status,
-      api: "nationalTrafficVolumn",
+  for (const sumDate of trafficSumDateCandidates()) {
+    const result = await fetchExApiJson(trafficBaseUrl, key, {
+      type: "json",
+      sumDate,
+      exDivCode: "00",
     });
-    return fallback;
+
+    if (!result?.res.ok) {
+      lastStatus = result?.res.status;
+      continue;
+    }
+
+    const data = result.json as { list?: Array<Record<string, string | number>> | null; message?: string };
+    lastApiMessage = data.message;
+    const list = Array.isArray(data.list) ? data.list : [];
+    if (!list.length) continue;
+
+    const totalVolume = list.reduce((sum, item) => sum + Number(item.trafficVolumn ?? 0), 0);
+    const congestion = volumeToCongestion(totalVolume);
+    const estimated = estimateTravelMinutes(origin, destination, congestion);
+
+    return {
+      route: `${origin} → ${destination}`,
+      congestion_level: congestion,
+      estimated_time_min: estimated,
+      detour_available: congestion !== "원활",
+      message: `전국 교통량 ${totalVolume.toLocaleString("ko-KR")}대 기준 (${sumDate})`,
+    };
   }
 
-  const data = result.json as { list?: Array<Record<string, string | number>> | null; message?: string };
-  const list = Array.isArray(data.list) ? data.list : [];
-  if (!list.length) {
-    logger.warn("교통 API 응답 비어 있음, mock 데이터 사용", {
-      operation: "getTraffic",
-      origin,
-      destination,
-      message: data.message,
-    });
-    return fallback;
-  }
-
-  const totalVolume = list.reduce((sum, item) => sum + Number(item.trafficVolumn ?? 0), 0);
-  const congestion = volumeToCongestion(totalVolume);
-  const estimated = estimateTravelMinutes(origin, destination, congestion);
-
-  return {
-    route: `${origin} → ${destination}`,
-    congestion_level: congestion,
-    estimated_time_min: estimated,
-    detour_available: congestion !== "원활",
-    message: `전국 교통량 ${totalVolume.toLocaleString("ko-KR")}대 기준 (${sumDate})`,
-  };
+  logger.warn("교통 API 실패, mock 데이터 사용", {
+    operation: "getTraffic",
+    origin,
+    destination,
+    status: lastStatus,
+    apiMessage: lastApiMessage,
+    api: "nationalTrafficVolumn",
+  });
+  return fallback;
 }
 
 export async function getKtxSchedule(departure: string, arrival: string, date: string) {

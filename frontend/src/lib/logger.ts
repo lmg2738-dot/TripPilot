@@ -14,8 +14,8 @@ function write(level: LogLevel, message: string, context?: LogContext) {
     ts: new Date().toISOString(),
     level,
     service: "trippilot",
-    message,
     ...context,
+    message,
   };
   const line = JSON.stringify(entry);
   if (level === "error") console.error(line);

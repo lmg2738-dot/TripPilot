@@ -76,7 +76,7 @@ export async function fetchExApiJson(
 ): Promise<{ json: unknown; res: Response } | null> {
   let authRetried = false;
 
-  for (const base of withHttpHttpsFallback(baseUrl)) {
+  for (const base of withHttpHttpsFallback(baseUrl, true)) {
     const url = buildExApiUrl(base, apiKey, params);
     const result = await fetchJsonSafe(url);
     if (!result) continue;
@@ -110,7 +110,16 @@ function createTimeoutSignal(timeoutMs = EXTERNAL_API_TIMEOUT_MS): AbortSignal {
   return AbortSignal.timeout(timeoutMs);
 }
 
-function withHttpHttpsFallback(baseUrl: string): string[] {
+function withHttpHttpsFallback(baseUrl: string, preferHttps = false): string[] {
+  if (preferHttps) {
+    if (baseUrl.startsWith("http://")) {
+      return [baseUrl.replace("http://", "https://"), baseUrl];
+    }
+    if (baseUrl.startsWith("https://")) {
+      return [baseUrl, baseUrl.replace("https://", "http://")];
+    }
+    return [baseUrl];
+  }
   if (baseUrl.startsWith("https://")) {
     return [baseUrl.replace("https://", "http://"), baseUrl];
   }

@@ -7,12 +7,20 @@ import httpx
 from app.config import settings
 from app.schemas import TrafficResponse
 
-EX_TRAFFIC_VOLUME_URL = "http://data.ex.co.kr/openapi/trafficapi/nationalTrafficVolumn"
+EX_TRAFFIC_VOLUME_URL = "https://data.ex.co.kr/openapi/trafficapi/nationalTrafficVolumn"
+
+
+def _kst_offset_ymd(day_offset: int) -> str:
+    kst = datetime.now(timezone(timedelta(hours=9))) + timedelta(days=day_offset)
+    return kst.strftime("%Y%m%d")
 
 
 def _kst_today() -> str:
-    kst = datetime.now(timezone(timedelta(hours=9)))
-    return kst.strftime("%Y%m%d")
+    return _kst_offset_ymd(0)
+
+
+def _traffic_sum_dates() -> list[str]:
+    return [_kst_offset_ymd(-1), _kst_offset_ymd(-2), _kst_today()]
 
 
 def _build_ex_url(api_key: str, params: dict[str, str]) -> str:
@@ -64,36 +72,37 @@ class TrafficService:
         if not settings.ex_api_key:
             return fallback
 
-        sum_date = _kst_today()
-        params = {"type": "json", "sumDate": sum_date, "exDivCode": "00"}
+        params_base = {"type": "json", "exDivCode": "00"}
         keys = [settings.ex_api_key]
         if "%" in settings.ex_api_key:
             from urllib.parse import unquote
 
             keys.append(unquote(settings.ex_api_key))
 
-        async with httpx.AsyncClient(timeout=20.0) as client:
-            for api_key in keys:
-                try:
-                    resp = await client.get(_build_ex_url(api_key, params))
-                    if resp.status_code in (401, 403):
+        async with httpx.AsyncClient(timeout=12.0) as client:
+            for sum_date in _traffic_sum_dates():
+                params = {**params_base, "sumDate": sum_date}
+                for api_key in keys:
+                    try:
+                        resp = await client.get(_build_ex_url(api_key, params))
+                        if resp.status_code in (401, 403):
+                            continue
+                        resp.raise_for_status()
+                        data = resp.json()
+                        items = data.get("list") or []
+                        if not items:
+                            continue
+                        total = sum(int(item.get("trafficVolumn", 0) or 0) for item in items)
+                        congestion = _volume_to_congestion(total)
+                        return TrafficResponse(
+                            route=f"{origin} → {destination}",
+                            congestion_level=congestion,
+                            estimated_time_min=_estimate_minutes(origin, destination, congestion),
+                            detour_available=congestion != "원활",
+                            message=f"전국 교통량 {total:,}대 기준 ({sum_date})",
+                        )
+                    except Exception:
                         continue
-                    resp.raise_for_status()
-                    data = resp.json()
-                    items = data.get("list") or []
-                    if not items:
-                        continue
-                    total = sum(int(item.get("trafficVolumn", 0) or 0) for item in items)
-                    congestion = _volume_to_congestion(total)
-                    return TrafficResponse(
-                        route=f"{origin} → {destination}",
-                        congestion_level=congestion,
-                        estimated_time_min=_estimate_minutes(origin, destination, congestion),
-                        detour_available=congestion != "원활",
-                        message=f"전국 교통량 {total:,}대 기준 ({sum_date})",
-                    )
-                except Exception:
-                    continue
 
         return fallback
 
