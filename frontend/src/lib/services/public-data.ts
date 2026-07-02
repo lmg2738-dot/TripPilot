@@ -103,8 +103,10 @@ export async function getTraffic(origin: string, destination: string) {
     return { route: `${origin} → ${destination}`, congestion_level: "보통", estimated_time_min: 90, detour_available: true, message: "교통량 보통" };
   }
   const data = result.json;
-  const items = Array.isArray(data) ? data : data?.list ?? [];
-  const item = items[0] ?? {};
+  const items = Array.isArray(data)
+    ? data
+    : ((data as { list?: unknown[] } | null)?.list ?? []);
+  const item = (items[0] ?? {}) as Record<string, string | undefined>;
   return {
     route: `${origin} → ${destination}`,
     congestion_level: item.congestion ?? "보통",
