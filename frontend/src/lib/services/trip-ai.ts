@@ -37,6 +37,32 @@ const MOCK = {
   travel_tips: ["선크림 필수"],
 };
 
+const ITINERARY_JSON_SCHEMA = `{
+  "title": "여행 제목",
+  "days": [
+    {
+      "day": 1,
+      "date": "2026-07-01",
+      "schedule": [
+        { "time": "09:00", "place": "장소명", "activity": "활동 설명", "type": "attraction" }
+      ],
+      "tips": "당일 팁"
+    }
+  ],
+  "recommendations": [
+    { "place": "추천 장소", "reason": "추천 이유", "recommended": true }
+  ],
+  "hidden_gems": [
+    { "place": "숨겨진 명소", "reason": "이유" }
+  ],
+  "transportation": "이동 수단",
+  "indoor_alternatives": [
+    { "original": "야외 일정", "alternative": "실내 대체", "reason": "비 오는 날 대비" }
+  ],
+  "ai_reasoning": "일정 구성 이유",
+  "travel_tips": ["여행 팁1", "여행 팁2"]
+}`;
+
 export async function generateItinerary(
   destination: string,
   startDate: string,
@@ -57,7 +83,7 @@ export async function generateItinerary(
     [
       {
         role: "system",
-        content: `You are a Korea travel planner. Output JSON only in Korean with keys: title, days, recommendations, hidden_gems, transportation, indoor_alternatives, ai_reasoning, travel_tips.`,
+        content: `You are a Korea travel planner. Respond with JSON only (no markdown). Use exactly these English keys and Korean text values. Include at least 3 recommendations, 2 hidden_gems, and 2 indoor_alternatives. Schema:\n${ITINERARY_JSON_SCHEMA}`,
       },
       {
         role: "user",

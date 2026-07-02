@@ -116,16 +116,25 @@ export default function TripDetailPage() {
             <h2 className="text-lg font-bold mb-4">
               Day {day.day} <span className="text-slate-400 font-normal text-base">{day.date}</span>
             </h2>
-            <div className="space-y-0">
+            <div className="space-y-1">
               {day.schedule?.map((item, idx) => (
-                <div key={idx} className="flex gap-4 py-3 border-b border-slate-50 last:border-0">
-                  <span className="text-brand-600 font-mono font-bold w-14 shrink-0">{item.time}</span>
-                  <div className="flex-1">
-                    <p className="font-medium">{item.place}</p>
-                    <p className="text-sm text-slate-500">{item.activity}</p>
+                <div
+                  key={idx}
+                  className="grid grid-cols-[5.5rem_1fr] sm:grid-cols-[6.5rem_1fr_auto] gap-x-3 gap-y-1 py-3 border-b border-slate-50 last:border-0 items-start"
+                >
+                  <span className="text-brand-600 font-mono text-sm font-bold leading-snug whitespace-nowrap">
+                    {item.time || "—"}
+                  </span>
+                  <div className="min-w-0">
+                    {item.place && <p className="font-medium leading-snug">{item.place}</p>}
+                    {item.activity && (
+                      <p className={`text-sm text-slate-500 leading-snug ${item.place ? "mt-0.5" : ""}`}>
+                        {item.activity}
+                      </p>
+                    )}
                   </div>
                   {idx < (day.schedule?.length ?? 0) - 1 && (
-                    <span className="text-slate-300 self-center">↓</span>
+                    <span className="hidden sm:block text-slate-300 self-center">↓</span>
                   )}
                 </div>
               ))}
@@ -139,21 +148,25 @@ export default function TripDetailPage() {
         <div className="grid md:grid-cols-2 gap-6">
           <div className="card">
             <h3 className="font-bold mb-4">AI 추천</h3>
-            <div className="space-y-3">
-              {itinerary.recommendations?.map((rec, i) => (
-                <div key={i} className="flex items-start gap-2">
-                  {rec.recommended ? (
-                    <ThumbsUp className="w-4 h-4 text-green-500 mt-0.5 shrink-0" />
-                  ) : (
-                    <ThumbsDown className="w-4 h-4 text-red-400 mt-0.5 shrink-0" />
-                  )}
-                  <div>
-                    <p className="font-medium text-sm">{rec.place}</p>
-                    <p className="text-xs text-slate-500">{rec.reason}</p>
+            {itinerary.recommendations?.length ? (
+              <div className="space-y-3">
+                {itinerary.recommendations.map((rec, i) => (
+                  <div key={i} className="flex items-start gap-2">
+                    {rec.recommended ? (
+                      <ThumbsUp className="w-4 h-4 text-green-500 mt-0.5 shrink-0" />
+                    ) : (
+                      <ThumbsDown className="w-4 h-4 text-red-400 mt-0.5 shrink-0" />
+                    )}
+                    <div className="min-w-0">
+                      <p className="font-medium text-sm">{rec.place}</p>
+                      {rec.reason && <p className="text-xs text-slate-500 mt-0.5">{rec.reason}</p>}
+                    </div>
                   </div>
-                </div>
-              ))}
-            </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-slate-400">추천 정보가 없습니다. 일정 재생성을 시도해 보세요.</p>
+            )}
           </div>
 
           <div className="card">
@@ -161,14 +174,18 @@ export default function TripDetailPage() {
               <Gem className="w-4 h-4 text-purple-500" />
               숨겨진 명소
             </h3>
-            <div className="space-y-3">
-              {itinerary.hidden_gems?.map((gem, i) => (
-                <div key={i}>
-                  <p className="font-medium text-sm">{gem.place}</p>
-                  <p className="text-xs text-slate-500">{gem.reason}</p>
-                </div>
-              ))}
-            </div>
+            {itinerary.hidden_gems?.length ? (
+              <div className="space-y-3">
+                {itinerary.hidden_gems.map((gem, i) => (
+                  <div key={i}>
+                    <p className="font-medium text-sm">{gem.place}</p>
+                    {gem.reason && <p className="text-xs text-slate-500 mt-0.5">{gem.reason}</p>}
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-slate-400">숨겨진 명소 정보가 없습니다.</p>
+            )}
           </div>
         </div>
 
@@ -194,19 +211,44 @@ export default function TripDetailPage() {
           </div>
         </div>
 
-        {itinerary.indoor_alternatives?.length > 0 && (
-          <div className="card">
-            <h3 className="font-bold mb-4">비 오면 대체 일정</h3>
+        <div className="card">
+          <h3 className="font-bold mb-4 flex items-center gap-2">
+            <CloudRain className="w-5 h-5 text-sky-500" />
+            비 오면 대체 일정
+          </h3>
+          {itinerary.indoor_alternatives?.length ? (
             <div className="space-y-2">
               {itinerary.indoor_alternatives.map((alt, i) => (
                 <div key={i} className="text-sm bg-slate-50 rounded-lg px-4 py-3">
-                  <span className="text-slate-400">{alt.original}</span>
-                  <span className="mx-2">→</span>
-                  <span className="font-medium text-brand-600">{alt.alternative}</span>
-                  <p className="text-xs text-slate-500 mt-1">{alt.reason}</p>
+                  {alt.original && alt.alternative ? (
+                    <>
+                      <span className="text-slate-600">{alt.original}</span>
+                      <span className="mx-2 text-slate-400">→</span>
+                      <span className="font-medium text-brand-600">{alt.alternative}</span>
+                    </>
+                  ) : (
+                    <span className="font-medium text-brand-600">{alt.alternative || alt.original}</span>
+                  )}
+                  {alt.reason && <p className="text-xs text-slate-500 mt-1">{alt.reason}</p>}
                 </div>
               ))}
             </div>
+          ) : (
+            <p className="text-sm text-slate-400">대체 일정이 없습니다. 재생성 시 비 대비 실내 코스가 추가됩니다.</p>
+          )}
+        </div>
+
+        {itinerary.travel_tips?.length > 0 && (
+          <div className="card">
+            <h3 className="font-bold mb-4">여행 팁</h3>
+            <ul className="space-y-2">
+              {itinerary.travel_tips.map((tip, i) => (
+                <li key={i} className="text-sm text-slate-600 flex gap-2">
+                  <span className="text-brand-500 shrink-0">•</span>
+                  <span>{tip}</span>
+                </li>
+              ))}
+            </ul>
           </div>
         )}
       </main>
