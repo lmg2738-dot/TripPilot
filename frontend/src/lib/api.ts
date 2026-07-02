@@ -93,7 +93,16 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
     throw new Error(detail);
   }
   if (res.status === 204) return {} as T;
-  return res.json();
+  const contentType = res.headers.get("content-type") || "";
+  const raw = await res.text();
+  if (!contentType.includes("application/json")) {
+    throw new Error(`JSON 응답이 아닙니다 (${res.status}): ${raw.slice(0, 200)}`);
+  }
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    throw new Error(`JSON 파싱 실패 (${res.status}): ${raw.slice(0, 200)}`);
+  }
 }
 
 export async function ensureSession(): Promise<User> {
