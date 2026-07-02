@@ -1,0 +1,10 @@
+.env
+.env.local
+.env.*.local
+*.db
+venv/
+__pycache__/
+node_modules/
+.next/
+.vercel
+*.pem
