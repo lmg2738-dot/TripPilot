@@ -1,3 +1,6 @@
+import { formatNonJsonPreview } from "./http";
+import { logger } from "./logger";
+
 export interface User {
   id: string;
   name: string;
@@ -88,20 +91,26 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
       const parsed = JSON.parse(raw) as { detail?: string };
       if (parsed.detail) detail = parsed.detail;
     } catch {
-      if (raw) detail = raw.slice(0, 200);
+      if (raw) detail = formatNonJsonPreview(raw);
     }
+    logger.error("API 클라이언트 요청 실패", undefined, {
+      operation: "api.request",
+      path,
+      status: res.status,
+      detail,
+    });
     throw new Error(detail);
   }
   if (res.status === 204) return {} as T;
   const contentType = res.headers.get("content-type") || "";
   const raw = await res.text();
   if (!contentType.includes("application/json")) {
-    throw new Error(`JSON 응답이 아닙니다 (${res.status}): ${raw.slice(0, 200)}`);
+    throw new Error(`JSON 응답이 아닙니다 (${res.status}): ${formatNonJsonPreview(raw)}`);
   }
   try {
     return JSON.parse(raw) as T;
   } catch {
-    throw new Error(`JSON 파싱 실패 (${res.status}): ${raw.slice(0, 200)}`);
+    throw new Error(`JSON 파싱 실패 (${res.status}): ${formatNonJsonPreview(raw)}`);
   }
 }
 
@@ -116,7 +125,7 @@ export async function ensureSession(): Promise<User> {
         ? (JSON.parse(raw) as { detail?: string; session_id?: string; user?: User })
         : {};
     } catch {
-      data = { detail: raw?.slice(0, 200) || `세션 생성 실패 (${res.status})` };
+      data = { detail: formatNonJsonPreview(raw) || `세션 생성 실패 (${res.status})` };
     }
     if (!res.ok) throw new Error(data.detail || `세션 생성 실패 (${res.status})`);
     if (!data.session_id || !data.user) throw new Error("세션 응답 형식 오류");

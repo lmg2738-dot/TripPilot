@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getUser } from "@/lib/api-helpers";
+import { handleApiError } from "@/lib/api-error";
 import { requireSupabase } from "@/lib/supabase";
 import { searchAttractions, getWeather, getTraffic } from "@/lib/services/public-data";
 import { generateItinerary, calculateBudget, TripPreferences } from "@/lib/services/trip-ai";
@@ -39,7 +40,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     return NextResponse.json(updated);
   } catch (error) {
-    const detail = error instanceof Error ? error.message : "여행 재생성 중 오류가 발생했습니다.";
-    return NextResponse.json({ detail }, { status: 500 });
+    return handleApiError(error, "여행 재생성 중 오류가 발생했습니다.", {
+      route: "POST /api/trips/[id]/regenerate",
+      operation: "regenerate_trip",
+      sessionId: req.headers.get("X-Session-Id"),
+    });
   }
 }

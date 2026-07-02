@@ -1,5 +1,6 @@
 import { env } from "../env";
 import { chatCompletion, parseJsonContent } from "../openrouter";
+import { logger } from "../logger";
 
 export interface TripPreferences {
   companions: string;
@@ -47,6 +48,7 @@ export async function generateItinerary(
 ): Promise<Record<string, unknown>> {
   const apiKey = env.openrouterApiKey();
   if (!apiKey) {
+    logger.warn("OpenRouter API 키 없음, mock 일정 사용", { operation: "generateItinerary", destination });
     return { ...MOCK, title: `${destination} 여행` };
   }
 
@@ -80,6 +82,7 @@ export function calculateBudget(preferences: TripPreferences, itinerary: Record<
 export async function chatReply(message: string, tripContext?: Record<string, unknown>) {
   const apiKey = env.openrouterApiKey();
   if (!apiKey) {
+    logger.warn("OpenRouter API 키 없음, mock 챗봇 응답 사용", { operation: "chatReply" });
     return {
       reply: "아이가 힘들어하신다면 **국립해양박물관**이나 **센텀시티 아쿠아리움**을 추천드립니다.",
       suggestions: ["국립해양박물관", "센텀시티 아쿠아리움"],

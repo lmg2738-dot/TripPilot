@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { randomBytes } from "crypto";
 import { getUser } from "@/lib/api-helpers";
+import { handleApiError } from "@/lib/api-error";
 import { requireSupabase } from "@/lib/supabase";
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -19,7 +20,10 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
 
     return NextResponse.json({ share_token: shareToken, share_url: `/share/${shareToken}` });
   } catch (error) {
-    const detail = error instanceof Error ? error.message : "여행 공유 처리 중 오류가 발생했습니다.";
-    return NextResponse.json({ detail }, { status: 500 });
+    return handleApiError(error, "여행 공유 처리 중 오류가 발생했습니다.", {
+      route: "POST /api/trips/[id]/share",
+      operation: "share_trip",
+      sessionId: req.headers.get("X-Session-Id"),
+    });
   }
 }

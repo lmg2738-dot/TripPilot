@@ -1,4 +1,6 @@
 import { env } from "../env";
+import { fetchJsonSafe } from "../http";
+import { logger } from "../logger";
 
 const AREA_CODES: Record<string, string> = {
   서울: "1", 부산: "6", 제주: "39", 대구: "4", 인천: "2",
@@ -19,8 +21,12 @@ export async function searchAttractions(destination: string, limit = 20) {
     serviceKey: key, MobileOS: "ETC", MobileApp: "TripPilot",
     numOfRows: String(limit), pageNo: "1", _type: "json", listYN: "Y", arrange: "O", areaCode,
   });
-  const res = await fetch(`http://apis.data.go.kr/B551011/KorService2/areaBasedList2?${params}`);
-  const data = await res.json();
+  const result = await fetchJsonSafe(`http://apis.data.go.kr/B551011/KorService2/areaBasedList2?${params}`);
+  if (!result) {
+    logger.warn("관광지 API 실패, mock 데이터 사용", { operation: "searchAttractions", destination });
+    return MOCK_BUSAN.slice(0, limit);
+  }
+  const data = result.json as { response?: { body?: { items?: { item?: unknown } } } };
   const items = data?.response?.body?.items?.item ?? [];
   const list = Array.isArray(items) ? items : [items];
   return list.map((i: Record<string, string>) => ({
@@ -55,8 +61,16 @@ export async function getWeather(destination: string, days = 3) {
     serviceKey: key, pageNo: "1", numOfRows: "1000", dataType: "JSON",
     base_date: baseDate, base_time: baseTime, nx: String(nx), ny: String(ny),
   });
-  const res = await fetch(`http://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getVilageFcst?${params}`);
-  const data = await res.json();
+  const result = await fetchJsonSafe(`http://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getVilageFcst?${params}`);
+  if (!result) {
+    logger.warn("기상 API 실패, mock 데이터 사용", { operation: "getWeather", destination });
+    return Array.from({ length: days }, (_, i) => ({
+      date: new Date(Date.now() + i * 86400000).toISOString().slice(0, 10),
+      location: destination, sky: "맑음", temp_min: 18 + i, temp_max: 26 + i,
+      rain_probability: 30 + i * 10, wind_speed: 2.5, uv_index: 6, feels_like: 24 + i,
+    }));
+  }
+  const data = result.json as { response?: { body?: { items?: { item?: Record<string, string>[] } } } };
   const items: Record<string, string>[] = data?.response?.body?.items?.item ?? [];
   const daily: Record<string, Record<string, string>> = {};
   for (const item of items) {
@@ -83,8 +97,12 @@ export async function getTraffic(origin: string, destination: string) {
     return { route: `${origin} → ${destination}`, congestion_level: "보통", estimated_time_min: 90, detour_available: true, message: "교통량 보통" };
   }
   const params = new URLSearchParams({ key, type: "json", numOfRows: "10", pageNo: "1" });
-  const res = await fetch(`https://data.ex.co.kr/openapi/trafficapi/liveTraffic?${params}`);
-  const data = await res.json();
+  const result = await fetchJsonSafe(`https://data.ex.co.kr/openapi/trafficapi/liveTraffic?${params}`);
+  if (!result) {
+    logger.warn("교통 API 실패, mock 데이터 사용", { operation: "getTraffic", origin, destination });
+    return { route: `${origin} → ${destination}`, congestion_level: "보통", estimated_time_min: 90, detour_available: true, message: "교통량 보통" };
+  }
+  const data = result.json;
   const items = Array.isArray(data) ? data : data?.list ?? [];
   const item = items[0] ?? {};
   return {
@@ -108,8 +126,12 @@ export async function getKtxSchedule(departure: string, arrival: string, date: s
     serviceKey: key, depPlaceId: departure, arrPlaceId: arrival,
     depPlandTime: date.replace(/-/g, ""), numOfRows: "10", _type: "json",
   });
-  const res = await fetch(`http://apis.data.go.kr/1613000/TrainInfoService/getStrtpntAlocFndTrainInfo?${params}`);
-  const data = await res.json();
+  const result = await fetchJsonSafe(`http://apis.data.go.kr/1613000/TrainInfoService/getStrtpntAlocFndTrainInfo?${params}`);
+  if (!result) {
+    logger.warn("KTX API 실패, mock 데이터 사용", { operation: "getKtxSchedule", departure, arrival, date });
+    return mock;
+  }
+  const data = result.json as { response?: { body?: { items?: { item?: unknown } } } };
   const items = data?.response?.body?.items?.item ?? [];
   const list = Array.isArray(items) ? items : [items];
   if (!list.length) return mock;

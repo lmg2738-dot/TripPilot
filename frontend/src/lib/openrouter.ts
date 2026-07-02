@@ -1,3 +1,6 @@
+import { formatNonJsonPreview, readResponseBody } from "./http";
+import { logger } from "./logger";
+
 const BLOCKLIST = new Set<string>();
 const FALLBACK = [
   "google/gemma-3-12b-it:free",
@@ -33,8 +36,15 @@ function dedupeModels(models: string[]): string[] {
   return result;
 }
 
+function isAuthFailure(text: string): boolean {
+  const lower = text.toLowerCase().trim();
+  return lower === "unauthorized" || lower.startsWith("unauthorized ") || lower.includes("invalid api key");
+}
+
 function shouldTryNextModel(status: number, text: string): boolean {
+  if (isAuthFailure(text)) return false;
   const lower = text.toLowerCase();
+  if (lower.includes("<!doctype") || lower.startsWith("<html")) return true;
   if ([404, 408, 409, 425, 429, 500, 502, 503, 504].includes(status)) return true;
   if (
     lower.includes("no endpoints found") ||
@@ -50,8 +60,11 @@ function shouldTryNextModel(status: number, text: string): boolean {
 }
 
 function shouldTreatAsModelContentFailure(text: string): boolean {
+  if (isAuthFailure(text)) return true;
   const lower = text.toLowerCase();
   return (
+    lower.includes("<!doctype") ||
+    lower.startsWith("<html") ||
     lower.includes("api not found") ||
     lower.includes("no endpoints found") ||
     lower.includes("model not found") ||
@@ -63,18 +76,25 @@ function shouldTreatAsModelContentFailure(text: string): boolean {
 export async function fetchFreeModels(forceRefresh = false): Promise<string[]> {
   if (!forceRefresh && cache.models.length && Date.now() - cache.at < 3600_000) return cache.models;
   try {
-    const res = await fetch("https://openrouter.ai/api/v1/models");
-    if (!res.ok) {
-      throw new Error(`모델 목록 조회 실패: HTTP ${res.status}`);
+    const res = await fetch("https://openrouter.ai/api/v1/models", {
+      headers: { Authorization: `Bearer ${process.env.OPENROUTER_API_KEY ?? ""}` },
+    });
+    const { json, text } = await readResponseBody(res);
+    if (!res.ok || !json) {
+      throw new Error(text || `모델 목록 조회 실패: HTTP ${res.status}`);
     }
-    const data = await res.json();
+    const data = json as { data?: { id: string; pricing?: { prompt?: string; completion?: string } }[] };
     const modelsFromApi = (data.data ?? [])
       .filter((m: { id: string; pricing?: { prompt?: string; completion?: string } }) =>
         m.id && !BLOCKLIST.has(m.id) && isFree(m.pricing ?? {}))
       .map((m: { id: string }) => m.id);
     const models = dedupeModels([...modelsFromApi, ...FALLBACK]);
     cache = { models: models.length ? models : dedupeModels(FALLBACK), at: Date.now() };
-  } catch {
+  } catch (error) {
+    logger.warn("OpenRouter 모델 목록 조회 실패, fallback 사용", {
+      operation: "fetchFreeModels",
+      error: error instanceof Error ? { name: error.name, message: error.message } : { message: String(error) },
+    });
     cache = { models: dedupeModels(FALLBACK), at: Date.now() };
   }
   return cache.models;
@@ -128,30 +148,60 @@ export async function chatCompletion(
           body: JSON.stringify(body),
         });
 
-        if ([401, 403].includes(res.status)) {
-          const authErrorText = await res.text();
-          throw new Error(`OpenRouter 인증 오류: ${authErrorText || `HTTP ${res.status}`}`);
+        const { json, text: responseText } = await readResponseBody(res);
+
+        if ([401, 403].includes(res.status) || isAuthFailure(responseText)) {
+          const authError = new Error(`OpenRouter 인증 오류: ${responseText || `HTTP ${res.status}`}. OPENROUTER_API_KEY를 확인하세요.`);
+          logger.error("OpenRouter 인증 실패", authError, { operation: "chatCompletion", model, status: res.status });
+          throw authError;
         }
 
         if (!res.ok) {
-          const errorText = await res.text();
-          if (shouldTryNextModel(res.status, errorText)) {
+          if (shouldTryNextModel(res.status, responseText)) {
+            logger.warn("OpenRouter 모델 실패, 다음 모델 시도", {
+              operation: "chatCompletion",
+              model,
+              status: res.status,
+              preview: formatNonJsonPreview(responseText, 120),
+            });
             markFailed(model);
-            lastError = new Error(`${model}: ${errorText || `HTTP ${res.status}`}`);
+            lastError = new Error(`${model}: ${responseText || `HTTP ${res.status}`}`);
             continue;
           }
-          throw new Error(errorText || `OpenRouter 요청 실패: HTTP ${res.status}`);
+          throw new Error(responseText || `OpenRouter 요청 실패: HTTP ${res.status}`);
         }
 
-        const data = await res.json();
+        if (!json) {
+          const preview = formatNonJsonPreview(responseText);
+          if (shouldTryNextModel(res.status, responseText)) {
+            logger.warn("OpenRouter 비JSON 응답, 다음 모델 시도", {
+              operation: "chatCompletion",
+              model,
+              status: res.status,
+              preview,
+            });
+            markFailed(model);
+            lastError = new Error(`${model}: ${preview || "JSON 응답 아님"}`);
+            continue;
+          }
+          throw new Error(preview || "OpenRouter JSON 응답 파싱 실패");
+        }
+
+        const data = json as { choices?: { message?: { content?: string } }[] };
         const content = data.choices?.[0]?.message?.content ?? "";
         const trimmed = String(content).trim();
         if (!trimmed) {
+          logger.warn("OpenRouter 빈 응답, 다음 모델 시도", { operation: "chatCompletion", model });
           markFailed(model);
           lastError = new Error(`${model}: 빈 응답`);
           continue;
         }
         if (shouldTreatAsModelContentFailure(trimmed)) {
+          logger.warn("OpenRouter 콘텐츠 오류, 다음 모델 시도", {
+            operation: "chatCompletion",
+            model,
+            preview: trimmed.slice(0, 120),
+          });
           markFailed(model);
           lastError = new Error(`${model}: ${trimmed.slice(0, 200)}`);
           continue;
@@ -160,7 +210,12 @@ export async function chatCompletion(
           try {
             // JSON 모드에서는 실제 JSON인지 검증 후 반환
             parseJsonContent(trimmed);
-          } catch {
+          } catch (parseError) {
+            logger.warn("OpenRouter JSON 형식 오류, 다음 모델 시도", {
+              operation: "chatCompletion",
+              model,
+              error: parseError instanceof Error ? { message: parseError.message } : { message: String(parseError) },
+            });
             markFailed(model);
             lastError = new Error(`${model}: JSON 응답 형식 아님`);
             continue;
@@ -174,11 +229,22 @@ export async function chatCompletion(
         }
         markFailed(model);
         lastError = e;
+        logger.warn("OpenRouter 모델 요청 예외, 다음 모델 시도", {
+          operation: "chatCompletion",
+          model,
+          error: e instanceof Error ? { name: e.name, message: e.message } : { message: String(e) },
+        });
       }
     }
   }
 
-  throw new Error(`무료 모델 모두 실패: ${lastError}`);
+  const finalError = new Error(`무료 모델 모두 실패: ${lastError}`);
+  logger.error("OpenRouter 모든 무료 모델 실패", finalError, {
+    operation: "chatCompletion",
+    triedModels: [...tried],
+    jsonMode: opts.jsonMode ?? false,
+  });
+  throw finalError;
 }
 
 export function parseJsonContent(content: string): Record<string, unknown> {

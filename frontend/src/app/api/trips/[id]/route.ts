@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getUser } from "@/lib/api-helpers";
+import { handleApiError } from "@/lib/api-error";
 import { requireSupabase } from "@/lib/supabase";
 
 export async function GET(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -14,7 +15,10 @@ export async function GET(req: NextRequest, { params }: { params: Promise<{ id: 
     if (!trip) return NextResponse.json({ detail: "여행 없음" }, { status: 404 });
     return NextResponse.json(trip);
   } catch (error) {
-    const detail = error instanceof Error ? error.message : "여행 조회 중 오류가 발생했습니다.";
-    return NextResponse.json({ detail }, { status: 500 });
+    return handleApiError(error, "여행 조회 중 오류가 발생했습니다.", {
+      route: "GET /api/trips/[id]",
+      operation: "get_trip",
+      sessionId: req.headers.get("X-Session-Id"),
+    });
   }
 }

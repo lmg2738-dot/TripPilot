@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getUser } from "@/lib/api-helpers";
 import { env } from "@/lib/env";
+import { handleApiError, logApiWarn, logDbError } from "@/lib/api-error";
 import { requireSupabase } from "@/lib/supabase";
 import { searchAttractions, getWeather, getTraffic, getKtxSchedule } from "@/lib/services/public-data";
 import { generateItinerary, calculateBudget, TripPreferences } from "@/lib/services/trip-ai";
@@ -19,7 +20,11 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ detail: `무료 플랜은 ${env.freeTripLimit()}회까지 가능합니다.` }, { status: 403 });
     }
 
-    const body = await req.json();
+    const body = await req.json().catch(() => null);
+    if (!body) {
+      logApiWarn("요청 본문 JSON 파싱 실패", { route: "POST /api/trips", operation: "parse_body", sessionId });
+      return NextResponse.json({ detail: "요청 본문 JSON 형식이 올바르지 않습니다." }, { status: 400 });
+    }
     const prefs: TripPreferences = body.preferences ?? {};
     const dayCount = nights(body.start_date, body.end_date) + 1;
 
@@ -50,13 +55,19 @@ export async function POST(req: NextRequest) {
       budget,
     }).select().single();
 
-    if (error) return NextResponse.json({ detail: error.message }, { status: 500 });
+    if (error) {
+      logDbError("여행 저장 실패", error, { route: "POST /api/trips", operation: "insert_trip", sessionId, userId: user.id });
+      return NextResponse.json({ detail: error.message }, { status: 500 });
+    }
 
     await db.from("users").update({ trip_count: user.trip_count + 1 }).eq("id", user.id);
     return NextResponse.json(trip, { status: 201 });
   } catch (error) {
-    const detail = error instanceof Error ? error.message : "여행 생성 중 오류가 발생했습니다.";
-    return NextResponse.json({ detail }, { status: 500 });
+    return handleApiError(error, "여행 생성 중 오류가 발생했습니다.", {
+      route: "POST /api/trips",
+      operation: "create_trip",
+      sessionId: req.headers.get("X-Session-Id"),
+    });
   }
 }
 
@@ -70,7 +81,10 @@ export async function GET(req: NextRequest) {
     const { data } = await db.from("trips").select().eq("owner_id", user.id).order("created_at", { ascending: false });
     return NextResponse.json(data ?? []);
   } catch (error) {
-    const detail = error instanceof Error ? error.message : "여행 목록 조회 중 오류가 발생했습니다.";
-    return NextResponse.json({ detail }, { status: 500 });
+    return handleApiError(error, "여행 목록 조회 중 오류가 발생했습니다.", {
+      route: "GET /api/trips",
+      operation: "list_trips",
+      sessionId: req.headers.get("X-Session-Id"),
+    });
   }
 }
