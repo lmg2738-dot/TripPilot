@@ -1,6 +1,7 @@
 import { env } from "../env";
 import { chatCompletion, parseJsonContent } from "../openrouter";
 import { logger } from "../logger";
+import { normalizeItinerary } from "../trip-normalize";
 
 export interface TripPreferences {
   companions: string;
@@ -65,7 +66,7 @@ export async function generateItinerary(
     ],
     { jsonMode: true, apiKey, siteUrl: env.openrouterSiteUrl(), appName: env.openrouterAppName() },
   );
-  return parseJsonContent(content);
+  return normalizeItinerary(parseJsonContent(content));
 }
 
 export function calculateBudget(preferences: TripPreferences, itinerary: Record<string, unknown>, nights: number) {

@@ -16,6 +16,7 @@ import {
   Loader2,
 } from "lucide-react";
 import { api, ensureSession, type Trip } from "@/lib/api";
+import { normalizeTrip } from "@/lib/trip-normalize";
 import ChatBot from "@/components/ChatBot";
 
 export default function TripDetailPage() {
@@ -30,7 +31,7 @@ export default function TripDetailPage() {
   useEffect(() => {
     ensureSession()
       .then(() => api.getTrip(id))
-      .then(setTrip)
+      .then((data) => setTrip(normalizeTrip(data)))
       .catch(() => router.push("/dashboard"))
       .finally(() => setLoading(false));
   }, [id, router]);
@@ -39,7 +40,7 @@ export default function TripDetailPage() {
     setActionLoading("regenerate");
     try {
       const updated = await api.regenerateTrip(id);
-      setTrip(updated);
+      setTrip(normalizeTrip(updated));
     } catch (err) {
       alert(err instanceof Error ? err.message : "재생성 실패");
     } finally {
@@ -116,14 +117,14 @@ export default function TripDetailPage() {
               Day {day.day} <span className="text-slate-400 font-normal text-base">{day.date}</span>
             </h2>
             <div className="space-y-0">
-              {day.schedule.map((item, idx) => (
+              {day.schedule?.map((item, idx) => (
                 <div key={idx} className="flex gap-4 py-3 border-b border-slate-50 last:border-0">
                   <span className="text-brand-600 font-mono font-bold w-14 shrink-0">{item.time}</span>
                   <div className="flex-1">
                     <p className="font-medium">{item.place}</p>
                     <p className="text-sm text-slate-500">{item.activity}</p>
                   </div>
-                  {idx < day.schedule.length - 1 && (
+                  {idx < (day.schedule?.length ?? 0) - 1 && (
                     <span className="text-slate-300 self-center">↓</span>
                   )}
                 </div>

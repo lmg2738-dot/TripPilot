@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Plane, Plus, MapPin, Calendar, LogOut } from "lucide-react";
 import { api, clearAuth, ensureSession, type Trip, type User } from "@/lib/api";
+import { normalizeTrip } from "@/lib/trip-normalize";
 
 export default function DashboardPage() {
   const router = useRouter();
@@ -18,7 +19,7 @@ export default function DashboardPage() {
         setUser(u);
         return api.listTrips();
       })
-      .then(setTrips)
+      .then((list) => setTrips(list.map(normalizeTrip)))
       .catch(() => router.push("/"))
       .finally(() => setLoading(false));
   }, [router]);
@@ -96,7 +97,7 @@ export default function DashboardPage() {
                 </div>
                 <div className="text-right">
                   <p className="text-lg font-bold text-brand-600">
-                    {trip.budget.total.toLocaleString()}원
+                    {(trip.budget?.total ?? 0).toLocaleString()}원
                   </p>
                   <p className="text-xs text-slate-400">예상 경비</p>
                 </div>
