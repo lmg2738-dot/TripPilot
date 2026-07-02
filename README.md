@@ -24,7 +24,7 @@
 | `OPENROUTER_APP_NAME` | OpenRouter 앱 이름 |
 | `KIPRIS_API_KEY` | KIPRIS API (향후 확장) |
 | `KOSIS_API_KEY` | KOSIS API (향후 확장) |
-| `FREE_TRIP_LIMIT` | 무료 여행 생성 횟수 (기본 3) |
+| `FREE_TRIP_LIMIT` | 무료 여행 생성 횟수 (기본 10) |
 
 > **주의:** API 키는 절대 GitHub에 커밋하지 마세요. Vercel Environment Variables에만 등록하세요.
 

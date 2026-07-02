@@ -12,5 +12,7 @@ export const env = {
   kosisApiKey: () => getEnv("KOSIS_API_KEY"),
   supabaseUrl: () => getEnv("NEXT_PUBLIC_SUPABASE_URL"),
   supabaseAnonKey: () => getEnv("NEXT_PUBLIC_SUPABASE_ANON_KEY"),
-  freeTripLimit: () => parseInt(getEnv("FREE_TRIP_LIMIT", "3"), 10),
+  freeTripLimit: () => parseInt(getEnv("FREE_TRIP_LIMIT", "10"), 10),
+  /** 클라이언트 UI 표시용 (서버 한도와 동일 값 권장) */
+  publicFreeTripLimit: () => parseInt(getEnv("NEXT_PUBLIC_FREE_TRIP_LIMIT", getEnv("FREE_TRIP_LIMIT", "10")), 10),
 };

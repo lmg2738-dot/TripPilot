@@ -11,6 +11,7 @@ export async function GET() {
       openrouter_api_key: Boolean(env.openrouterApiKey()),
       public_data_api_key: Boolean(env.publicDataApiKey()),
       ex_api_key: Boolean(env.exApiKey()),
+      free_trip_limit: env.freeTripLimit(),
     },
   });
 }

@@ -5,6 +5,7 @@ import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { Plane, Plus, MapPin, Calendar, LogOut } from "lucide-react";
 import { api, clearAuth, ensureSession, type Trip, type User } from "@/lib/api";
+import { env } from "@/lib/env";
 import { normalizeTrip } from "@/lib/trip-normalize";
 
 export default function DashboardPage() {
@@ -47,7 +48,7 @@ export default function DashboardPage() {
           </Link>
           <div className="flex items-center gap-4">
             <span className="text-sm text-slate-500">
-              {user?.name} · {user?.plan_type === "premium" ? "Premium" : `무료 (${user?.trip_count}/3)`}
+              {user?.name} · {user?.plan_type === "premium" ? "Premium" : `무료 (${user?.trip_count}/${env.publicFreeTripLimit()})`}
             </span>
             <button onClick={handleLogout} className="text-slate-400 hover:text-slate-600">
               <LogOut className="w-5 h-5" />

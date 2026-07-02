@@ -17,7 +17,7 @@ class Settings(BaseSettings):
     supabase_anon_key: str = ""
 
     cors_origins: str = "http://localhost:3000"
-    free_trip_limit: int = 3
+    free_trip_limit: int = 10
 
     class Config:
         env_file = ".env"
