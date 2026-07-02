@@ -9,32 +9,37 @@ function nights(start: string, end: string) {
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
-  const sessionId = req.headers.get("X-Session-Id");
-  const user = await getUser(sessionId);
-  if (!user) return NextResponse.json({ detail: "X-Session-Id 필요" }, { status: 401 });
+  try {
+    const { id } = await params;
+    const sessionId = req.headers.get("X-Session-Id");
+    const user = await getUser(sessionId);
+    if (!user) return NextResponse.json({ detail: "X-Session-Id 필요" }, { status: 401 });
 
-  const db = requireSupabase();
-  const { data: trip } = await db.from("trips").select().eq("id", id).eq("owner_id", user.id).single();
-  if (!trip) return NextResponse.json({ detail: "여행 없음" }, { status: 404 });
+    const db = requireSupabase();
+    const { data: trip } = await db.from("trips").select().eq("id", id).eq("owner_id", user.id).single();
+    if (!trip) return NextResponse.json({ detail: "여행 없음" }, { status: 404 });
 
-  const prefs = trip.preferences as TripPreferences;
-  const dayCount = nights(trip.start_date, trip.end_date) + 1;
-  const [attractions, weather, traffic] = await Promise.all([
-    searchAttractions(trip.destination),
-    getWeather(trip.destination, dayCount),
-    getTraffic("서울", trip.destination),
-  ]);
+    const prefs = trip.preferences as TripPreferences;
+    const dayCount = nights(trip.start_date, trip.end_date) + 1;
+    const [attractions, weather, traffic] = await Promise.all([
+      searchAttractions(trip.destination),
+      getWeather(trip.destination, dayCount),
+      getTraffic("서울", trip.destination),
+    ]);
 
-  const itinerary = await generateItinerary(
-    trip.destination, trip.start_date, trip.end_date, prefs, weather, attractions,
-    `${traffic.congestion_level}, ${traffic.estimated_time_min}분`, "",
-  );
-  const budget = calculateBudget(prefs, itinerary, nights(trip.start_date, trip.end_date));
+    const itinerary = await generateItinerary(
+      trip.destination, trip.start_date, trip.end_date, prefs, weather, attractions,
+      `${traffic.congestion_level}, ${traffic.estimated_time_min}분`, "",
+    );
+    const budget = calculateBudget(prefs, itinerary, nights(trip.start_date, trip.end_date));
 
-  const { data: updated } = await db.from("trips").update({
-    itinerary, budget, title: (itinerary.title as string) ?? trip.title, updated_at: new Date().toISOString(),
-  }).eq("id", id).select().single();
+    const { data: updated } = await db.from("trips").update({
+      itinerary, budget, title: (itinerary.title as string) ?? trip.title, updated_at: new Date().toISOString(),
+    }).eq("id", id).select().single();
 
-  return NextResponse.json(updated);
+    return NextResponse.json(updated);
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "여행 재생성 중 오류가 발생했습니다.";
+    return NextResponse.json({ detail }, { status: 500 });
+  }
 }

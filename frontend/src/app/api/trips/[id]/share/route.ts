@@ -4,17 +4,22 @@ import { getUser } from "@/lib/api-helpers";
 import { requireSupabase } from "@/lib/supabase";
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
-  const { id } = await params;
-  const sessionId = req.headers.get("X-Session-Id");
-  const user = await getUser(sessionId);
-  if (!user) return NextResponse.json({ detail: "X-Session-Id 필요" }, { status: 401 });
+  try {
+    const { id } = await params;
+    const sessionId = req.headers.get("X-Session-Id");
+    const user = await getUser(sessionId);
+    if (!user) return NextResponse.json({ detail: "X-Session-Id 필요" }, { status: 401 });
 
-  const db = requireSupabase();
-  const { data: trip } = await db.from("trips").select().eq("id", id).eq("owner_id", user.id).single();
-  if (!trip) return NextResponse.json({ detail: "여행 없음" }, { status: 404 });
+    const db = requireSupabase();
+    const { data: trip } = await db.from("trips").select().eq("id", id).eq("owner_id", user.id).single();
+    if (!trip) return NextResponse.json({ detail: "여행 없음" }, { status: 404 });
 
-  const shareToken = trip.share_token ?? randomBytes(24).toString("base64url");
-  await db.from("trips").update({ share_token: shareToken, is_shared: true }).eq("id", id);
+    const shareToken = trip.share_token ?? randomBytes(24).toString("base64url");
+    await db.from("trips").update({ share_token: shareToken, is_shared: true }).eq("id", id);
 
-  return NextResponse.json({ share_token: shareToken, share_url: `/share/${shareToken}` });
+    return NextResponse.json({ share_token: shareToken, share_url: `/share/${shareToken}` });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "여행 공유 처리 중 오류가 발생했습니다.";
+    return NextResponse.json({ detail }, { status: 500 });
+  }
 }

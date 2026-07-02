@@ -82,21 +82,31 @@ async function request<T>(path: string, options: RequestInit = {}): Promise<T> {
 
   const res = await fetch(path, { ...options, headers });
   if (!res.ok) {
-    const err = await res.json().catch(() => ({ detail: "요청 실패" }));
-    throw new Error(err.detail || "요청 실패");
+    const raw = await res.text();
+    let detail = `요청 실패 (${res.status})`;
+    try {
+      const parsed = JSON.parse(raw) as { detail?: string };
+      if (parsed.detail) detail = parsed.detail;
+    } catch {
+      if (raw) detail = raw.slice(0, 200);
+    }
+    throw new Error(detail);
   }
   if (res.status === 204) return {} as T;
   return res.json();
 }
 
 export async function ensureSession(): Promise<User> {
-  let sessionId = getSessionId();
+  const sessionId = getSessionId();
   if (!sessionId) {
     const res = await fetch("/api/auth/session", { method: "POST" });
-    const data = await res.json();
-    if (!res.ok) throw new Error(data.detail || "세션 생성 실패");
-    sessionId = data.session_id;
-    setSessionId(sessionId!);
+    const raw = await res.text();
+    const data = raw
+      ? (JSON.parse(raw) as { detail?: string; session_id?: string; user?: User })
+      : {};
+    if (!res.ok) throw new Error(data.detail || `세션 생성 실패 (${res.status})`);
+    if (!data.session_id || !data.user) throw new Error("세션 응답 형식 오류");
+    setSessionId(data.session_id);
     return data.user;
   }
   return request<User>("/api/auth/session");
