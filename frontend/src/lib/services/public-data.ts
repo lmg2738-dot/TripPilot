@@ -75,7 +75,7 @@ export async function searchAttractions(destination: string, limit = 20) {
   if (!key) return MOCK_BUSAN.slice(0, limit);
 
   const result = await fetchPublicDataJson(
-    "https://apis.data.go.kr/B551011/KorService2/areaBasedList2",
+    "http://apis.data.go.kr/B551011/KorService2/areaBasedList2",
     key,
     {
       MobileOS: "ETC",
@@ -122,11 +122,11 @@ export async function getWeather(destination: string, days = 3) {
 
   const { baseDate, baseTime } = getKmaBaseDateTime();
   const result = await fetchPublicDataJson(
-    "https://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getVilageFcst",
+    "http://apis.data.go.kr/1360000/VilageFcstInfoService_2.0/getVilageFcst",
     key,
     {
       pageNo: "1",
-      numOfRows: "1000",
+      numOfRows: "200",
       dataType: "JSON",
       base_date: baseDate,
       base_time: baseTime,
@@ -256,29 +256,26 @@ export async function getKtxSchedule(departure: string, arrival: string, date: s
 
   const depPlaceId = resolveStationId(departure);
   const arrPlaceId = resolveStationId(arrival);
-  const result = await fetchPublicDataJson(
-    "http://openapi.tago.go.kr/openapi/service/TrainInfoService/getStrtpntAlocFndTrainInfo",
-    key,
-    {
-      depPlaceId,
-      arrPlaceId,
-      depPlandTime: date.replace(/-/g, ""),
-      numOfRows: "10",
-      pageNo: "1",
-      _type: "json",
-    },
-  ) ?? await fetchPublicDataJson(
-    "https://apis.data.go.kr/1613000/TrainInfoService/getStrtpntAlocFndTrainInfo",
-    key,
-    {
-      depPlaceId,
-      arrPlaceId,
-      depPlandTime: date.replace(/-/g, ""),
-      numOfRows: "10",
-      pageNo: "1",
-      _type: "json",
-    },
-  );
+  const trainParams = {
+    depPlaceId,
+    arrPlaceId,
+    depPlandTime: date.replace(/-/g, ""),
+    numOfRows: "10",
+    pageNo: "1",
+    _type: "json",
+  };
+
+  const result =
+    (await fetchPublicDataJson(
+      "http://openapi.tago.go.kr/openapi/service/TrainInfoService/getStrtpntAlocFndTrainInfo",
+      key,
+      trainParams,
+    )) ??
+    (await fetchPublicDataJson(
+      "http://apis.data.go.kr/1613000/TrainInfoService/getStrtpntAlocFndTrainInfo",
+      key,
+      trainParams,
+    ));
 
   if (!result?.res.ok) {
     logger.warn("KTX API 실패, mock 데이터 사용", {
