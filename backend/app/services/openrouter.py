@@ -37,6 +37,42 @@ def _is_free(model: dict) -> bool:
     return prompt == 0.0 and completion == 0.0
 
 
+def _is_plain_text_error(text: str) -> bool:
+    lower = text.lower().strip()
+    return any(
+        token in lower
+        for token in (
+            "api not found",
+            "unauthorized",
+            "invalid api key",
+            "no endpoints found",
+            "model not found",
+            "provider returned error",
+            "<!doctype",
+        )
+    )
+
+
+def _read_response_json(resp: httpx.Response) -> tuple[dict[str, Any] | list[Any] | str | None, str]:
+    text = resp.text or ""
+    if not text.strip():
+        return None, text
+    try:
+        return resp.json(), text
+    except Exception:
+        return None, text
+
+
+def _should_try_next_model(status_code: int, text: str) -> bool:
+    if _is_plain_text_error(text):
+        return True
+    return status_code in (400, 404, 408, 409, 425, 429, 500, 502, 503, 504)
+
+
+def _content_is_failure(content: str) -> bool:
+    return _is_plain_text_error(content)
+
+
 async def fetch_free_models() -> list[str]:
     now = time.time()
     if _cache["models"] and now - _cache["fetched_at"] < CACHE_TTL:
@@ -46,8 +82,11 @@ async def fetch_free_models() -> list[str]:
     try:
         async with httpx.AsyncClient(timeout=20.0) as client:
             resp = await client.get(MODELS_URL)
-            resp.raise_for_status()
-            data = resp.json()
+            data, text = _read_response_json(resp)
+            if resp.status_code >= 400 or data is None:
+                raise RuntimeError(text or f"HTTP {resp.status_code}")
+            if not isinstance(data, dict):
+                raise RuntimeError(text or "모델 목록 JSON 형식 오류")
             for m in data.get("data", []):
                 mid = m.get("id", "")
                 if mid and mid not in BLOCKLIST and _is_free(m):
@@ -106,15 +145,44 @@ async def chat_completion(
                     headers=headers,
                     json=body,
                 )
-                if resp.status_code in (404, 429, 502, 503):
+                data, text = _read_response_json(resp)
+                if resp.status_code in (401, 403) or _is_plain_text_error(text):
+                    raise ValueError(
+                        f"OpenRouter 인증 오류: {text or f'HTTP {resp.status_code}'}. OPENROUTER_API_KEY를 확인하세요."
+                    )
+                if resp.status_code >= 400 or data is None:
+                    if _should_try_next_model(resp.status_code, text):
+                        mark_model_failed(model_id)
+                        last_error = RuntimeError(f"{model_id}: {text or f'HTTP {resp.status_code}'}")
+                        continue
+                    resp.raise_for_status()
+
+                if isinstance(data, str):
+                    content = data.strip()
+                elif isinstance(data, dict):
+                    if _content_is_failure(str(data.get("error", ""))):
+                        mark_model_failed(model_id)
+                        last_error = RuntimeError(f"{model_id}: {data.get('error')}")
+                        continue
+                    content = (data.get("choices") or [{}])[0].get("message", {}).get("content") or ""
+                else:
                     mark_model_failed(model_id)
-                    last_error = RuntimeError(f"{model_id}: HTTP {resp.status_code}")
+                    last_error = RuntimeError(f"{model_id}: JSON 응답 형식 오류")
                     continue
-                resp.raise_for_status()
-                data = resp.json()
-                content = data["choices"][0]["message"]["content"] or ""
-                if content.strip():
+
+                content = str(content).strip()
+                if content and not _content_is_failure(content):
+                    if json_mode:
+                        try:
+                            parse_json_content(content)
+                        except Exception as parse_error:
+                            mark_model_failed(model_id)
+                            last_error = parse_error if isinstance(parse_error, Exception) else RuntimeError(str(parse_error))
+                            continue
                     return content
+
+                mark_model_failed(model_id)
+                last_error = RuntimeError(f"{model_id}: {content or '빈 응답'}")
             except httpx.HTTPStatusError as e:
                 mark_model_failed(model_id)
                 last_error = e
@@ -129,7 +197,14 @@ async def chat_completion(
 
 def parse_json_content(content: str) -> dict[str, Any]:
     text = content.strip()
+    if _content_is_failure(text):
+        raise ValueError(f"AI 응답 오류: {text[:200]}")
     if text.startswith("```"):
         lines = text.split("\n")
         text = "\n".join(lines[1:-1] if lines[-1].strip() == "```" else lines[1:])
-    return json.loads(text)
+    if _content_is_failure(text):
+        raise ValueError(f"AI 응답 오류: {text[:200]}")
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        raise ValueError(f"AI JSON 파싱 실패: {text[:200]}") from None

@@ -15,8 +15,26 @@ export async function readResponseBody(res: Response): Promise<{ json: unknown |
   }
 }
 
+export function isPlainTextErrorResponse(text: string): boolean {
+  const lower = text.toLowerCase().trim();
+  return (
+    lower.includes("<!doctype") ||
+    lower.startsWith("<html") ||
+    lower.includes("api not found") ||
+    lower === "unauthorized" ||
+    lower.startsWith("unauthorized ") ||
+    lower.includes("invalid api key") ||
+    lower.includes("no endpoints found") ||
+    lower.includes("model not found") ||
+    lower.includes("provider returned error") ||
+    lower.includes("temporarily unavailable") ||
+    lower.includes("rate limit")
+  );
+}
+
 export function formatNonJsonPreview(text: string, maxLen = 200): string {
   if (isHtmlResponse(text)) return "HTML 오류 페이지 응답";
+  if (isPlainTextErrorResponse(text)) return text.trim().slice(0, maxLen);
   return text.slice(0, maxLen);
 }
 

@@ -1,4 +1,4 @@
-import { formatNonJsonPreview, readResponseBody } from "./http";
+import { formatNonJsonPreview, isPlainTextErrorResponse, readResponseBody } from "./http";
 import { logger } from "./logger";
 
 const BLOCKLIST = new Set<string>();
@@ -41,11 +41,23 @@ function isAuthFailure(text: string): boolean {
   return lower === "unauthorized" || lower.startsWith("unauthorized ") || lower.includes("invalid api key");
 }
 
+function extractApiErrorMessage(json: unknown): string | null {
+  if (!json || typeof json !== "object" || Array.isArray(json)) return null;
+  const record = json as Record<string, unknown>;
+  if (typeof record.error === "string") return record.error;
+  if (record.error && typeof record.error === "object") {
+    const message = (record.error as { message?: unknown }).message;
+    if (typeof message === "string") return message;
+  }
+  if (typeof record.message === "string") return record.message;
+  return null;
+}
+
 function shouldTryNextModel(status: number, text: string): boolean {
   if (isAuthFailure(text)) return false;
+  if (isPlainTextErrorResponse(text)) return true;
   const lower = text.toLowerCase();
-  if (lower.includes("<!doctype") || lower.startsWith("<html")) return true;
-  if ([404, 408, 409, 425, 429, 500, 502, 503, 504].includes(status)) return true;
+  if ([400, 404, 408, 409, 425, 429, 500, 502, 503, 504].includes(status)) return true;
   if (
     lower.includes("no endpoints found") ||
     lower.includes("model not found") ||
@@ -60,17 +72,7 @@ function shouldTryNextModel(status: number, text: string): boolean {
 }
 
 function shouldTreatAsModelContentFailure(text: string): boolean {
-  if (isAuthFailure(text)) return true;
-  const lower = text.toLowerCase();
-  return (
-    lower.includes("<!doctype") ||
-    lower.startsWith("<html") ||
-    lower.includes("api not found") ||
-    lower.includes("no endpoints found") ||
-    lower.includes("model not found") ||
-    lower.includes("provider returned error") ||
-    lower.includes("temporarily unavailable")
-  );
+  return isAuthFailure(text) || isPlainTextErrorResponse(text);
 }
 
 export async function fetchFreeModels(forceRefresh = false): Promise<string[]> {
@@ -187,6 +189,47 @@ export async function chatCompletion(
           throw new Error(preview || "OpenRouter JSON 응답 파싱 실패");
         }
 
+        if (typeof json === "string") {
+          const stringContent = json.trim();
+          if (!stringContent || shouldTreatAsModelContentFailure(stringContent)) {
+            logger.warn("OpenRouter 문자열 오류 응답, 다음 모델 시도", {
+              operation: "chatCompletion",
+              model,
+              preview: stringContent.slice(0, 120),
+            });
+            markFailed(model);
+            lastError = new Error(`${model}: ${stringContent.slice(0, 200) || "빈 문자열 응답"}`);
+            continue;
+          }
+          if (opts.jsonMode) {
+            try {
+              parseJsonContent(stringContent);
+            } catch (parseError) {
+              logger.warn("OpenRouter JSON 형식 오류, 다음 모델 시도", {
+                operation: "chatCompletion",
+                model,
+                error: parseError instanceof Error ? { message: parseError.message } : { message: String(parseError) },
+              });
+              markFailed(model);
+              lastError = new Error(`${model}: JSON 응답 형식 아님`);
+              continue;
+            }
+          }
+          return stringContent;
+        }
+
+        const apiErrorMessage = extractApiErrorMessage(json);
+        if (apiErrorMessage && shouldTreatAsModelContentFailure(apiErrorMessage)) {
+          logger.warn("OpenRouter API 오류 객체, 다음 모델 시도", {
+            operation: "chatCompletion",
+            model,
+            preview: apiErrorMessage.slice(0, 120),
+          });
+          markFailed(model);
+          lastError = new Error(`${model}: ${apiErrorMessage.slice(0, 200)}`);
+          continue;
+        }
+
         const data = json as { choices?: { message?: { content?: string } }[] };
         const content = data.choices?.[0]?.message?.content ?? "";
         const trimmed = String(content).trim();
@@ -228,17 +271,19 @@ export async function chatCompletion(
           throw e;
         }
         markFailed(model);
-        lastError = e;
+        lastError = e instanceof Error ? e : new Error(String(e));
         logger.warn("OpenRouter 모델 요청 예외, 다음 모델 시도", {
           operation: "chatCompletion",
           model,
-          error: e instanceof Error ? { name: e.name, message: e.message } : { message: String(e) },
+          error: lastError instanceof Error ? { name: lastError.name, message: lastError.message } : { message: String(lastError) },
         });
       }
     }
   }
 
-  const finalError = new Error(`무료 모델 모두 실패: ${lastError}`);
+  const finalError = new Error(
+    lastError instanceof Error ? `무료 모델 모두 실패: ${lastError.message}` : `무료 모델 모두 실패: ${String(lastError)}`,
+  );
   logger.error("OpenRouter 모든 무료 모델 실패", finalError, {
     operation: "chatCompletion",
     triedModels: [...tried],
@@ -249,12 +294,18 @@ export async function chatCompletion(
 
 export function parseJsonContent(content: string): Record<string, unknown> {
   let text = content.trim();
+  if (shouldTreatAsModelContentFailure(text)) {
+    throw new Error(`AI 응답 오류: ${text.slice(0, 200)}`);
+  }
   if (text.startsWith("```")) {
     const lines = text.split("\n");
     text = lines.slice(1, lines.at(-1)?.trim() === "```" ? -1 : undefined).join("\n");
   }
+  if (shouldTreatAsModelContentFailure(text)) {
+    throw new Error(`AI 응답 오류: ${text.slice(0, 200)}`);
+  }
   try {
-    return JSON.parse(text);
+    return JSON.parse(text) as Record<string, unknown>;
   } catch {
     throw new Error(`AI JSON 파싱 실패: ${text.slice(0, 200)}`);
   }
