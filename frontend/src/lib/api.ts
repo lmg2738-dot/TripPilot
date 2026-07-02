@@ -101,9 +101,14 @@ export async function ensureSession(): Promise<User> {
   if (!sessionId) {
     const res = await fetch("/api/auth/session", { method: "POST" });
     const raw = await res.text();
-    const data = raw
-      ? (JSON.parse(raw) as { detail?: string; session_id?: string; user?: User })
-      : {};
+    let data: { detail?: string; session_id?: string; user?: User } = {};
+    try {
+      data = raw
+        ? (JSON.parse(raw) as { detail?: string; session_id?: string; user?: User })
+        : {};
+    } catch {
+      data = { detail: raw?.slice(0, 200) || `세션 생성 실패 (${res.status})` };
+    }
     if (!res.ok) throw new Error(data.detail || `세션 생성 실패 (${res.status})`);
     if (!data.session_id || !data.user) throw new Error("세션 응답 형식 오류");
     setSessionId(data.session_id);
