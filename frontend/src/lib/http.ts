@@ -38,7 +38,6 @@ export function formatNonJsonPreview(text: string, maxLen = 200): string {
   return text.slice(0, maxLen);
 }
 
-/** 공공데이터포털 인코딩 키는 URLSearchParams로 다시 인코딩하면 401이 납니다. */
 export function buildPublicDataUrl(
   baseUrl: string,
   serviceKey: string,
@@ -52,6 +51,43 @@ export function buildPublicDataUrl(
   }
   rest.set("serviceKey", serviceKey);
   return `${baseUrl}?${rest.toString()}`;
+}
+
+/** 한국도로공사 OpenAPI는 query 파라미터명이 key 입니다. */
+export function buildExApiUrl(
+  baseUrl: string,
+  apiKey: string,
+  params: Record<string, string> = {},
+): string {
+  const rest = new URLSearchParams(params);
+  const restQuery = rest.toString();
+  const isPreEncoded = /%[0-9A-Fa-f]{2}/.test(apiKey);
+  if (isPreEncoded) {
+    return restQuery ? `${baseUrl}?key=${apiKey}&${restQuery}` : `${baseUrl}?key=${apiKey}`;
+  }
+  rest.set("key", apiKey);
+  return `${baseUrl}?${rest.toString()}`;
+}
+
+export async function fetchExApiJson(
+  baseUrl: string,
+  apiKey: string,
+  params: Record<string, string> = {},
+): Promise<{ json: unknown; res: Response } | null> {
+  const keyCandidates = apiKey.includes("%")
+    ? [apiKey, safeDecodeURIComponent(apiKey)]
+    : [apiKey];
+
+  let last: { json: unknown; res: Response } | null = null;
+  for (const key of keyCandidates) {
+    const url = buildExApiUrl(baseUrl, key, params);
+    const result = await fetchJsonSafe(url);
+    if (!result) continue;
+    last = result;
+    if (result.res.ok) return result;
+    if ([401, 403].includes(result.res.status)) continue;
+  }
+  return last;
 }
 
 function safeDecodeURIComponent(value: string): string {

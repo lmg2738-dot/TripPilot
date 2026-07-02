@@ -1,5 +1,5 @@
 import { env } from "../env";
-import { fetchJsonSafeWithFallback, fetchPublicDataJson } from "../http";
+import { fetchExApiJson, fetchPublicDataJson } from "../http";
 import { logger } from "../logger";
 
 const AREA_CODES: Record<string, string> = {
@@ -163,6 +163,35 @@ export async function getWeather(destination: string, days = 3) {
   }));
 }
 
+function kstTodayYmd(now = new Date()): string {
+  const kstMs = now.getTime() + (9 * 60 - now.getTimezoneOffset()) * 60 * 1000;
+  const kst = new Date(kstMs);
+  return `${kst.getUTCFullYear()}${String(kst.getUTCMonth() + 1).padStart(2, "0")}${String(kst.getUTCDate()).padStart(2, "0")}`;
+}
+
+function volumeToCongestion(totalVolume: number): string {
+  if (totalVolume >= 500_000) return "정체";
+  if (totalVolume >= 300_000) return "서행";
+  if (totalVolume >= 150_000) return "보통";
+  return "원활";
+}
+
+function estimateTravelMinutes(origin: string, destination: string, congestion: string): number {
+  const routeKey = `${origin}-${destination}`;
+  const baseMinutes: Record<string, number> = {
+    "서울-부산": 100,
+    "부산-서울": 100,
+    "서울-대구": 80,
+    "서울-광주": 95,
+    "서울-대전": 70,
+  };
+  const base = baseMinutes[routeKey] ?? 90;
+  if (congestion === "정체") return base + 35;
+  if (congestion === "서행") return base + 20;
+  if (congestion === "보통") return base + 10;
+  return base;
+}
+
 export async function getTraffic(origin: string, destination: string) {
   const key = env.exApiKey();
   const fallback = {
@@ -174,26 +203,46 @@ export async function getTraffic(origin: string, destination: string) {
   };
   if (!key) return fallback;
 
-  const query = new URLSearchParams({ key, type: "json", numOfRows: "10", pageNo: "1" }).toString();
-  const result = await fetchJsonSafeWithFallback([
-    `http://data.ex.co.kr/openapi/trafficapi/liveTraffic?${query}`,
-    `https://data.ex.co.kr/openapi/trafficapi/liveTraffic?${query}`,
-  ]);
+  const sumDate = kstTodayYmd();
+  const result = await fetchExApiJson(
+    "http://data.ex.co.kr/openapi/trafficapi/nationalTrafficVolumn",
+    key,
+    { type: "json", sumDate, exDivCode: "00" },
+  );
+
   if (!result?.res.ok) {
-    logger.warn("교통 API 실패, mock 데이터 사용", { operation: "getTraffic", origin, destination, status: result?.res.status });
+    logger.warn("교통 API 실패, mock 데이터 사용", {
+      operation: "getTraffic",
+      origin,
+      destination,
+      status: result?.res.status,
+      api: "nationalTrafficVolumn",
+    });
     return fallback;
   }
-  const data = result.json;
-  const items = Array.isArray(data)
-    ? data
-    : ((data as { list?: unknown[] } | null)?.list ?? []);
-  const item = (items[0] ?? {}) as Record<string, string | undefined>;
+
+  const data = result.json as { list?: Array<Record<string, string | number>> | null; message?: string };
+  const list = Array.isArray(data.list) ? data.list : [];
+  if (!list.length) {
+    logger.warn("교통 API 응답 비어 있음, mock 데이터 사용", {
+      operation: "getTraffic",
+      origin,
+      destination,
+      message: data.message,
+    });
+    return fallback;
+  }
+
+  const totalVolume = list.reduce((sum, item) => sum + Number(item.trafficVolumn ?? 0), 0);
+  const congestion = volumeToCongestion(totalVolume);
+  const estimated = estimateTravelMinutes(origin, destination, congestion);
+
   return {
     route: `${origin} → ${destination}`,
-    congestion_level: item.congestion ?? "보통",
-    estimated_time_min: parseInt(item.travelTime ?? "90", 10),
-    detour_available: true,
-    message: item.message ?? "조회 완료",
+    congestion_level: congestion,
+    estimated_time_min: estimated,
+    detour_available: congestion !== "원활",
+    message: `전국 교통량 ${totalVolume.toLocaleString("ko-KR")}대 기준 (${sumDate})`,
   };
 }
 
